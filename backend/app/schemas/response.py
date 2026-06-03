@@ -1,5 +1,5 @@
+from typing import List, Literal
 from pydantic import BaseModel
-from typing import List
 
 
 class MentorRecommendation(BaseModel):
@@ -14,3 +14,9 @@ class RecommendResponse(BaseModel):
     status: str
     message: str
     recommendations: List[MentorRecommendation]
+
+
+class ClarificationResponse(BaseModel):
+    status: Literal["need_clarification"]
+    question: str
+    options: List[str]

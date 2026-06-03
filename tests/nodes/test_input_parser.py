@@ -1,6 +1,6 @@
-import pytest
+import unittest
 
-from backend.app.nodes.interview_gap import (
+from backend.app.nodes.input_parser import (
     parse_input,
     _check_sufficiency_rule_based,
     _merge_clarify_answer,
@@ -28,7 +28,7 @@ SUFFICIENT_STATE = {
 # _check_sufficiency_rule_based 단위 테스트
 # ─────────────────────────────────────────────────────────────
 
-class TestCheckSufficiencyRuleBased:
+class TestCheckSufficiencyRuleBased(unittest.TestCase):
     def test_short_text_is_insufficient(self):
         ok, question, options = _check_sufficiency_rule_based("앱 만들어요", [])
         assert ok is False
@@ -69,7 +69,7 @@ class TestCheckSufficiencyRuleBased:
 # _merge_clarify_answer 단위 테스트
 # ─────────────────────────────────────────────────────────────
 
-class TestMergeClarifyAnswer:
+class TestMergeClarifyAnswer(unittest.TestCase):
     def test_merged_contains_both_texts(self):
         merged = _merge_clarify_answer("원본 텍스트입니다.", "추가 설명입니다.")
         assert "원본 텍스트입니다." in merged
@@ -84,7 +84,7 @@ class TestMergeClarifyAnswer:
 # parse_input 노드 통합 테스트
 # ─────────────────────────────────────────────────────────────
 
-class TestParseInput:
+class TestParseInput(unittest.TestCase):
     def test_sufficient_input_sets_is_sufficient_true(self):
         result = parse_input(SUFFICIENT_STATE)
         assert result["is_input_sufficient"] is True
@@ -157,3 +157,7 @@ class TestParseInput:
         }
         result = parse_input(state)
         assert result.get("clarification_question") == ""
+
+
+if __name__ == "__main__":
+    unittest.main()

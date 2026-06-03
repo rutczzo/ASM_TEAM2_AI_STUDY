@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass
 
 from backend.app.schemas.gap import GapContext, ParsedInput
@@ -163,7 +164,7 @@ RISK_SIGNALS = (
 def analyze_project_gap(parsed_input: ParsedInput | dict) -> GapContext:
     parsed = _to_parsed_input(parsed_input)
     scores = _score_rules(parsed)
-    selected_rules = _select_rules(scores)
+    selected_rules = _select_rules(scores, parsed)
 
     if not selected_rules:
         selected_rules = (GAP_RULES[-1],)
@@ -234,9 +235,33 @@ def _score_rules(parsed: ParsedInput) -> dict[GapRule, int]:
     return scores
 
 
-def _select_rules(scores: dict[GapRule, int]) -> tuple[GapRule, ...]:
-    ranked = sorted(scores.items(), key=lambda item: item[1], reverse=True)
+def _select_rules(
+    scores: dict[GapRule, int], parsed: ParsedInput
+) -> tuple[GapRule, ...]:
+    eligible_scores = {
+        rule: score
+        for rule, score in scores.items()
+        if score >= 3
+        or _first_matching_concern_index(parsed.concerns, rule) < len(parsed.concerns)
+    }
+    if not eligible_scores:
+        eligible_scores = scores
+
+    ranked = sorted(
+        eligible_scores.items(),
+        key=lambda item: (
+            _first_matching_concern_index(parsed.concerns, item[0]),
+            -item[1],
+        ),
+    )
     return tuple(rule for rule, _ in ranked[:3])
+
+
+def _first_matching_concern_index(concerns: list[str], rule: GapRule) -> int:
+    for index, concern in enumerate(concerns):
+        if _contains_signal(concern, rule.signals):
+            return index
+    return len(concerns) + 1
 
 
 def _source_fields(parsed: ParsedInput) -> list[str]:
@@ -313,8 +338,14 @@ def _build_reason(
 
 
 def _contains_signal(text: str, signals: tuple[str, ...]) -> bool:
-    lowered = text.casefold()
-    return any(signal.casefold() in lowered for signal in signals)
+    return any(_matches_signal(text, signal) for signal in signals)
+
+
+def _matches_signal(text: str, signal: str) -> bool:
+    if signal.isascii() and signal.replace(" ", "").isalnum():
+        pattern = rf"(?<![A-Za-z0-9]){re.escape(signal)}(?![A-Za-z0-9])"
+        return re.search(pattern, text, re.IGNORECASE) is not None
+    return signal.casefold() in text.casefold()
 
 
 def _join_text(values: list[str] | tuple[str, ...]) -> str:

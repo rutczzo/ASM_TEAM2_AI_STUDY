@@ -2,4 +2,7 @@ from pydantic import BaseModel
 
 
 class RecommendRequest(BaseModel):
-    user_input: str
+    project_text: str
+    tech_stack: list[str] = []
+    stage: str = ""
+    clarify_answer: str | None = None

@@ -167,7 +167,7 @@ def analyze_project_gap(parsed_input: ParsedInput | dict) -> GapContext:
     selected_rules = _select_rules(scores, parsed)
 
     if not selected_rules:
-        selected_rules = (GAP_RULES[-1],)
+        selected_rules = _fallback_rules(parsed)
 
     gap_categories = _collect_ranked_values(
         selected_rules, "categories", limit=6
@@ -194,7 +194,11 @@ def analyze_project_gap(parsed_input: ParsedInput | dict) -> GapContext:
 
 
 def interview_gap_node(state: dict) -> dict:
-    gap_context = analyze_project_gap(state.get("parsed_input", {}))
+    parsed_input = state.get("parsed_input")
+    if not _has_analyzable_input(parsed_input):
+        return {"gap_context": None}
+
+    gap_context = analyze_project_gap(parsed_input)
     return {"gap_context": gap_context.model_dump()}
 
 
@@ -202,6 +206,20 @@ def _to_parsed_input(parsed_input: ParsedInput | dict) -> ParsedInput:
     if isinstance(parsed_input, ParsedInput):
         return parsed_input
     return ParsedInput(**parsed_input)
+
+
+def _has_analyzable_input(parsed_input: ParsedInput | dict | None) -> bool:
+    if not parsed_input:
+        return False
+
+    parsed = _to_parsed_input(parsed_input)
+    return any(
+        (
+            parsed.project_summary.strip(),
+            parsed.concerns,
+            parsed.user_goal.strip(),
+        )
+    )
 
 
 def _score_rules(parsed: ParsedInput) -> dict[GapRule, int]:
@@ -258,6 +276,26 @@ def _select_rules(
     return tuple(rule for rule, _ in ranked[:3])
 
 
+def _fallback_rules(parsed: ParsedInput) -> tuple[GapRule, ...]:
+    if _has_enough_text_for_fallback(parsed):
+        return (GAP_RULES[-1],)
+    return ()
+
+
+def _has_enough_text_for_fallback(parsed: ParsedInput) -> bool:
+    text = _join_text(
+        [
+            parsed.project_summary,
+            parsed.user_goal,
+            parsed.current_stage,
+            *parsed.concerns,
+            *parsed.constraints,
+            *parsed.domain,
+        ]
+    )
+    return len(text.strip()) >= 20
+
+
 def _first_matching_concern_index(concerns: list[str], rule: GapRule) -> int:
     for index, concern in enumerate(concerns):
         if _contains_signal(concern, rule.signals):
@@ -287,7 +325,18 @@ def _matched_source_fields(
         ]
         if matched_values:
             matched_fields[field_name] = matched_values
-    return matched_fields
+    for field_name in ("current_stage", "constraints"):
+        risk_values = [
+            value
+            for value in _field_values(parsed, field_name)
+            if _contains_signal(value, RISK_SIGNALS)
+        ]
+        if risk_values:
+            matched_fields.setdefault(field_name, [])
+            matched_fields[field_name].extend(
+                value for value in risk_values if value not in matched_fields[field_name]
+            )
+    return _sort_matched_fields(matched_fields)
 
 
 def _decide_priority(
@@ -372,11 +421,28 @@ def _format_evidence(
     matched_fields: dict[str, list[str]], field_labels: dict[str, str]
 ) -> str:
     evidence_parts = []
-    for field_name, values in list(matched_fields.items())[:4]:
+    for field_name, values in list(matched_fields.items())[:5]:
         label = field_labels[field_name]
         value_text = ", ".join(values[:3])
         evidence_parts.append(f"{label} '{value_text}'")
     return ", ".join(evidence_parts)
+
+
+def _sort_matched_fields(matched_fields: dict[str, list[str]]) -> dict[str, list[str]]:
+    field_order = (
+        "concerns",
+        "current_stage",
+        "constraints",
+        "tech_stack",
+        "user_goal",
+        "domain",
+        "project_summary",
+    )
+    return {
+        field_name: matched_fields[field_name]
+        for field_name in field_order
+        if field_name in matched_fields
+    }
 
 
 def _unique(values) -> list[str]:

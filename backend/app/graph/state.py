@@ -5,10 +5,8 @@ class GraphState(TypedDict, total=False):
     user_input: str
 
     parsed_input: dict[str, Any]
-    is_input_sufficient: bool
-    clarification_question: str
+    gap_context: dict[str, Any]
 
-    gap_analysis: dict[str, Any]
     search_query: str
     retrieved_mentors: list[dict[str, Any]]
 

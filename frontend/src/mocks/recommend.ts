@@ -155,7 +155,7 @@ export function mockRecommend(req: RecommendRequest): RecommendResponse {
     return {
       status: 'need_clarification',
       question:
-        '추천을 위해 한 가지만 확인할게요 — 지금 가장 걱정되는 부분은 성능·확장성·배포·보안 중 어디에 가깝나요?',
+        '지금 가장 걱정되는 부분은 성능·확장성·배포·보안 중 어디에 가깝나요?',
       options: ['성능', '확장성', '배포', '보안'],
     };
   }

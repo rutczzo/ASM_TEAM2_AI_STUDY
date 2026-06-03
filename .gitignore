@@ -17,3 +17,7 @@ venv/
 # Vector DB / local artifacts
 chroma_db/
 faiss_index/
+
+# Claude personal context
+CLAUDE.local.md
+.claude/

@@ -178,7 +178,8 @@ def analyze_project_gap(parsed_input: ParsedInput | dict) -> GapContext:
     query_hints = _unique(
         hint for rule in selected_rules for hint in rule.query_hints
     )[:12]
-    source_fields = _source_fields(parsed)
+    matched_fields = _matched_source_fields(parsed, selected_rules)
+    source_fields = list(matched_fields.keys())
     priority = _decide_priority(parsed, gap_categories, scores)
 
     return GapContext(
@@ -186,7 +187,7 @@ def analyze_project_gap(parsed_input: ParsedInput | dict) -> GapContext:
         gap_categories=gap_categories,
         needed_mentor_expertise=needed_mentor_expertise,
         priority=priority,
-        reason=_build_reason(parsed, gap_categories, source_fields),
+        reason=_build_reason(gap_categories, matched_fields),
         query_hints=query_hints,
         source_fields=source_fields,
     )
@@ -264,8 +265,13 @@ def _first_matching_concern_index(concerns: list[str], rule: GapRule) -> int:
     return len(concerns) + 1
 
 
-def _source_fields(parsed: ParsedInput) -> list[str]:
-    fields = []
+def _matched_source_fields(
+    parsed: ParsedInput, selected_rules: tuple[GapRule, ...]
+) -> dict[str, list[str]]:
+    matched_fields: dict[str, list[str]] = {}
+    rule_signals = tuple(
+        signal for rule in selected_rules for signal in rule.signals
+    )
     for field_name in (
         "concerns",
         "tech_stack",
@@ -275,10 +281,13 @@ def _source_fields(parsed: ParsedInput) -> list[str]:
         "domain",
         "project_summary",
     ):
-        value = getattr(parsed, field_name)
-        if value:
-            fields.append(field_name)
-    return fields
+        values = _field_values(parsed, field_name)
+        matched_values = [
+            value for value in values if _contains_signal(value, rule_signals)
+        ]
+        if matched_values:
+            matched_fields[field_name] = matched_values
+    return matched_fields
 
 
 def _decide_priority(
@@ -311,7 +320,7 @@ def _build_main_gap(
 
 
 def _build_reason(
-    parsed: ParsedInput, gap_categories: list[str], source_fields: list[str]
+    gap_categories: list[str], matched_fields: dict[str, list[str]]
 ) -> str:
     field_labels = {
         "concerns": "현재 고민",
@@ -322,18 +331,16 @@ def _build_reason(
         "domain": "프로젝트 도메인",
         "project_summary": "프로젝트 요약",
     }
-    used_fields = ", ".join(field_labels[field] for field in source_fields[:4])
     category_text = ", ".join(gap_categories)
+    evidence = _format_evidence(matched_fields, field_labels)
 
-    concern_text = _join_text(parsed.concerns)
-    if concern_text:
+    if evidence:
         return (
-            f"{used_fields}에서 '{concern_text}' 관련 신호가 확인되어 "
+            f"{evidence}에서 관련 신호가 확인되어 "
             f"{category_text} 역량이 현재 멘토 검색의 핵심 기준으로 판단됩니다."
         )
     return (
-        f"{used_fields}를 기준으로 볼 때 {category_text} 역량 보완이 "
-        "멘토 검색의 우선 기준으로 판단됩니다."
+        f"{category_text} 역량 보완이 멘토 검색의 우선 기준으로 판단됩니다."
     )
 
 
@@ -350,6 +357,26 @@ def _matches_signal(text: str, signal: str) -> bool:
 
 def _join_text(values: list[str] | tuple[str, ...]) -> str:
     return " ".join(str(value) for value in values if value)
+
+
+def _field_values(parsed: ParsedInput, field_name: str) -> list[str]:
+    value = getattr(parsed, field_name)
+    if isinstance(value, list):
+        return [str(item) for item in value if item]
+    if value:
+        return [str(value)]
+    return []
+
+
+def _format_evidence(
+    matched_fields: dict[str, list[str]], field_labels: dict[str, str]
+) -> str:
+    evidence_parts = []
+    for field_name, values in list(matched_fields.items())[:4]:
+        label = field_labels[field_name]
+        value_text = ", ".join(values[:3])
+        evidence_parts.append(f"{label} '{value_text}'")
+    return ", ".join(evidence_parts)
 
 
 def _unique(values) -> list[str]:

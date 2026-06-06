@@ -26,3 +26,5 @@ class GraphState(TypedDict, total=False):
 
     final_recommendations: list[dict[str, Any]]
     message: str
+    # result_builder(노드4) 가 만드는 최종 응답 페이로드(프론트 계약 그대로).
+    final_response: dict[str, Any]

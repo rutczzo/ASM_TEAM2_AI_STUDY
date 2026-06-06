@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any
+
+from backend.app.core.env import load_dotenv
+from backend.app.rag.mentor_vector_store import QdrantMentorVectorStore
+from backend.app.rag.upstage_embeddings import UpstageEmbeddingClient
 
 
 DEFAULT_MENTORS_PATH = Path(__file__).resolve().parents[3] / "data" / "mentors.json"
@@ -92,11 +97,73 @@ def mentor_retrieval_node(state: dict[str, Any]) -> dict[str, Any]:
     if not gap_context:
         return {"search_query": "", "retrieved_mentors": []}
 
+    search_query = state.get("refined_query") or build_search_query(gap_context)
+    embedding_client = state.get("_embedding_client")
+    vector_store = state.get("_vector_store")
+    if embedding_client and vector_store:
+        return {
+            "search_query": search_query,
+            "retrieved_mentors": retrieve_mentor_candidates_rag(
+                gap_context,
+                embedding_client=embedding_client,
+                vector_store=vector_store,
+                refined_query=state.get("refined_query"),
+            ),
+        }
+
+    if _should_use_rag():
+        try:
+            return {
+                "search_query": search_query,
+                "retrieved_mentors": retrieve_mentor_candidates_rag(
+                    gap_context,
+                    embedding_client=UpstageEmbeddingClient.from_env(),
+                    vector_store=QdrantMentorVectorStore.from_env(),
+                    refined_query=state.get("refined_query"),
+                ),
+            }
+        except (OSError, ValueError, KeyError):
+            pass
+
     mentors = load_mentors()
     return {
-        "search_query": build_search_query(gap_context),
+        "search_query": search_query,
         "retrieved_mentors": retrieve_mentor_candidates(gap_context, mentors),
     }
+
+
+def retrieve_mentor_candidates_rag(
+    gap_context: dict[str, Any],
+    *,
+    embedding_client: Any,
+    vector_store: Any,
+    limit: int = 5,
+    refined_query: str | None = None,
+) -> list[dict[str, Any]]:
+    if not gap_context or limit <= 0:
+        return []
+
+    search_query = refined_query or build_search_query(gap_context)
+    query_vector = embedding_client.embed_query(search_query)
+    search_results = vector_store.search(query_vector, limit=limit)
+    query_terms = _terms_for_matching(search_query)
+
+    candidates = []
+    for result in search_results:
+        payload = result.get("payload", {})
+        if not isinstance(payload, dict):
+            continue
+
+        candidates.append(
+            {
+                **payload,
+                "retrieval_score": round(float(result.get("score", 0.0)), 4),
+                "matched_keywords": _matched_payload_keywords(payload, query_terms),
+                "matched_fields": ["mentor_document"],
+                "retrieval_source": "vector",
+            }
+        )
+    return candidates
 
 
 def _score_mentor(
@@ -118,6 +185,30 @@ def _score_mentor(
         matched_keywords.extend(_field_match_labels(field_name, field_values, gap_terms))
 
     return score, _unique_display_values(matched_keywords), matched_fields
+
+
+def _should_use_rag() -> bool:
+    load_dotenv()
+    mode = os.getenv("MENTOR_RETRIEVAL_MODE", "").casefold()
+    if mode in {"rag", "vector"}:
+        return True
+    return bool(os.getenv("UPSTAGE_API_KEY") and os.getenv("QDRANT_URL"))
+
+
+def _matched_payload_keywords(
+    payload: dict[str, Any],
+    query_terms: set[str],
+) -> list[str]:
+    matched_keywords = []
+    for field_name in MATCH_FIELDS:
+        matched_keywords.extend(
+            _field_match_labels(
+                field_name,
+                _field_values(payload, field_name),
+                query_terms,
+            )
+        )
+    return _unique_display_values(matched_keywords)
 
 
 def _extract_gap_terms(gap_context: dict[str, Any]) -> set[str]:

@@ -44,6 +44,9 @@ INFRA_GAP_CONTEXT = {
 
 
 class MentorRetrievalTest(unittest.TestCase):
+    def test_default_mock_mentor_data_has_ten_entries(self):
+        self.assertEqual(len(load_mentors()), 10)
+
     def test_rag_langgraph_gap_retrieves_ai_llm_mentor_first(self):
         mentors = load_mentors()
 

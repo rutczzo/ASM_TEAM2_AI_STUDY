@@ -17,6 +17,8 @@ venv/
 # Vector DB / local artifacts
 chroma_db/
 faiss_index/
+qdrant_storage/
+.qdrant-initialized
 
 # Claude personal context
 CLAUDE.local.md

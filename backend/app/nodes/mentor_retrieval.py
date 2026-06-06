@@ -6,7 +6,8 @@ import re
 from pathlib import Path
 from typing import Any
 
-from backend.app.core.env import load_dotenv
+from backend.app.core.env import DEFAULT_ENV_PATH, load_dotenv
+from backend.app.rag.bm25_retriever import retrieve_bm25_rule_candidates
 from backend.app.rag.mentor_vector_store import QdrantMentorVectorStore
 from backend.app.rag.upstage_embeddings import UpstageEmbeddingClient
 
@@ -65,31 +66,7 @@ def retrieve_mentor_candidates(
     mentors: list[dict[str, Any]],
     limit: int = 5,
 ) -> list[dict[str, Any]]:
-    if not gap_context or not mentors or limit <= 0:
-        return []
-
-    gap_terms = _extract_gap_terms(gap_context)
-    scored_candidates = []
-    for index, mentor in enumerate(mentors):
-        score, matched_keywords, matched_fields = _score_mentor(mentor, gap_terms)
-        if score <= 0:
-            continue
-
-        scored_candidates.append(
-            (
-                -score,
-                index,
-                {
-                    **mentor,
-                    "retrieval_score": round(score, 2),
-                    "matched_keywords": matched_keywords,
-                    "matched_fields": matched_fields,
-                },
-            )
-        )
-
-    scored_candidates.sort(key=lambda item: (item[0], item[1]))
-    return [candidate for _, _, candidate in scored_candidates[:limit]]
+    return retrieve_bm25_rule_candidates(gap_context, mentors, limit=limit)
 
 
 def mentor_retrieval_node(state: dict[str, Any]) -> dict[str, Any]:
@@ -98,38 +75,94 @@ def mentor_retrieval_node(state: dict[str, Any]) -> dict[str, Any]:
         return {"search_query": "", "retrieved_mentors": []}
 
     search_query = state.get("refined_query") or build_search_query(gap_context)
+    mentors = load_mentors()
+    retrieval_mode = get_retrieval_mode(
+        env_path=state.get("_env_path", DEFAULT_ENV_PATH),
+        mode_override=state.get("retrieval_mode"),
+    )
+
+    if retrieval_mode == "vector":
+        vector_candidates = _retrieve_vector_candidates(state, gap_context)
+        return {
+            "search_query": search_query,
+            "retrieved_mentors": vector_candidates
+            or retrieve_bm25_rule_candidates(
+                gap_context,
+                mentors,
+                search_query=search_query,
+            ),
+        }
+
+    if retrieval_mode == "hybrid":
+        bm25_candidates = retrieve_bm25_rule_candidates(
+            gap_context,
+            mentors,
+            search_query=search_query,
+        )
+        vector_candidates = _retrieve_vector_candidates(state, gap_context)
+        if not vector_candidates:
+            return {
+                "search_query": search_query,
+                "retrieved_mentors": bm25_candidates,
+            }
+
+        return {
+            "search_query": search_query,
+            "retrieved_mentors": merge_hybrid_candidates(
+                bm25_candidates,
+                vector_candidates,
+            ),
+        }
+
+    return {
+        "search_query": search_query,
+        "retrieved_mentors": retrieve_bm25_rule_candidates(
+            gap_context,
+            mentors,
+            search_query=search_query,
+        ),
+    }
+
+
+def _retrieve_vector_candidates(
+    state: dict[str, Any],
+    gap_context: dict[str, Any],
+) -> list[dict[str, Any]]:
     embedding_client = state.get("_embedding_client")
     vector_store = state.get("_vector_store")
     if embedding_client and vector_store:
-        return {
-            "search_query": search_query,
-            "retrieved_mentors": retrieve_mentor_candidates_rag(
+        try:
+            return retrieve_mentor_candidates_rag(
                 gap_context,
                 embedding_client=embedding_client,
                 vector_store=vector_store,
                 refined_query=state.get("refined_query"),
-            ),
-        }
+            )
+        except (OSError, ValueError, KeyError, AssertionError):
+            return []
 
-    if _should_use_rag():
+    if _has_vector_config():
         try:
-            return {
-                "search_query": search_query,
-                "retrieved_mentors": retrieve_mentor_candidates_rag(
-                    gap_context,
-                    embedding_client=UpstageEmbeddingClient.from_env(),
-                    vector_store=QdrantMentorVectorStore.from_env(),
-                    refined_query=state.get("refined_query"),
-                ),
-            }
+            return retrieve_mentor_candidates_rag(
+                gap_context,
+                embedding_client=UpstageEmbeddingClient.from_env(),
+                vector_store=QdrantMentorVectorStore.from_env(),
+                refined_query=state.get("refined_query"),
+            )
         except (OSError, ValueError, KeyError):
-            pass
+            return []
+    return []
 
-    mentors = load_mentors()
-    return {
-        "search_query": search_query,
-        "retrieved_mentors": retrieve_mentor_candidates(gap_context, mentors),
-    }
+
+def get_retrieval_mode(
+    env_path=DEFAULT_ENV_PATH,
+    mode_override: str | None = None,
+) -> str:
+    if mode_override:
+        return _normalize_retrieval_mode(mode_override)
+
+    load_dotenv(env_path)
+    return _normalize_retrieval_mode(os.getenv("MENTOR_RETRIEVAL_MODE", "bm25"))
 
 
 def retrieve_mentor_candidates_rag(
@@ -166,6 +199,66 @@ def retrieve_mentor_candidates_rag(
     return candidates
 
 
+def merge_hybrid_candidates(
+    bm25_candidates: list[dict[str, Any]],
+    vector_candidates: list[dict[str, Any]],
+    *,
+    limit: int = 5,
+    bm25_weight: float = 0.45,
+    vector_weight: float = 0.55,
+) -> list[dict[str, Any]]:
+    bm25_norm = _normalized_scores(bm25_candidates)
+    vector_norm = _normalized_scores(vector_candidates)
+    merged: dict[str, dict[str, Any]] = {}
+
+    for candidate in bm25_candidates:
+        key = _candidate_key(candidate)
+        merged[key] = {
+            **candidate,
+            "retrieval_score": bm25_weight * bm25_norm.get(key, 0.0),
+            "matched_keywords": list(candidate.get("matched_keywords", [])),
+            "matched_fields": list(candidate.get("matched_fields", [])),
+            "retrieval_source": "hybrid",
+        }
+
+    for candidate in vector_candidates:
+        key = _candidate_key(candidate)
+        if key not in merged:
+            merged[key] = {
+                **candidate,
+                "retrieval_score": 0.0,
+                "matched_keywords": [],
+                "matched_fields": [],
+                "retrieval_source": "hybrid",
+            }
+
+        merged_candidate = merged[key]
+        merged_candidate["retrieval_score"] += (
+            vector_weight * vector_norm.get(key, 0.0)
+        )
+        merged_candidate["matched_keywords"] = _unique_display_values(
+            [
+                *merged_candidate.get("matched_keywords", []),
+                *candidate.get("matched_keywords", []),
+            ]
+        )
+        merged_candidate["matched_fields"] = _unique_display_values(
+            [
+                *merged_candidate.get("matched_fields", []),
+                *candidate.get("matched_fields", []),
+            ]
+        )
+        merged_candidate["retrieval_source"] = "hybrid"
+
+    ranked = sorted(
+        merged.values(),
+        key=lambda candidate: (-candidate["retrieval_score"], candidate.get("name", "")),
+    )
+    for candidate in ranked:
+        candidate["retrieval_score"] = round(candidate["retrieval_score"], 4)
+    return ranked[:limit]
+
+
 def _score_mentor(
     mentor: dict[str, Any],
     gap_terms: set[str],
@@ -187,12 +280,39 @@ def _score_mentor(
     return score, _unique_display_values(matched_keywords), matched_fields
 
 
-def _should_use_rag() -> bool:
+def _has_vector_config() -> bool:
     load_dotenv()
-    mode = os.getenv("MENTOR_RETRIEVAL_MODE", "").casefold()
-    if mode in {"rag", "vector"}:
-        return True
     return bool(os.getenv("UPSTAGE_API_KEY") and os.getenv("QDRANT_URL"))
+
+
+def _normalize_retrieval_mode(value: str) -> str:
+    mode = value.strip().casefold()
+    if mode in {"rag", "vector"}:
+        return "vector"
+    if mode == "hybrid":
+        return "hybrid"
+    return "bm25"
+
+
+def _normalized_scores(candidates: list[dict[str, Any]]) -> dict[str, float]:
+    if not candidates:
+        return {}
+
+    scores = {
+        _candidate_key(candidate): float(candidate.get("retrieval_score", 0.0))
+        for candidate in candidates
+    }
+    max_score = max(scores.values(), default=0.0)
+    if max_score <= 0:
+        return {key: 0.0 for key in scores}
+    return {key: score / max_score for key, score in scores.items()}
+
+
+def _candidate_key(candidate: dict[str, Any]) -> str:
+    key = candidate.get("mentor_id") or candidate.get("name")
+    if key:
+        return str(key)
+    return f"anonymous:{id(candidate)}"
 
 
 def _matched_payload_keywords(

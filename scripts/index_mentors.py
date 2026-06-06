@@ -36,6 +36,11 @@ def index_mentors(
     store = vector_store or QdrantMentorVectorStore.from_env()
 
     vectors = embedder.embed_passages(documents)
+    if len(vectors) != len(mentors):
+        raise ValueError(
+            f"Embedding count mismatch: expected {len(mentors)}, got {len(vectors)}"
+        )
+
     store.ensure_collection(vector_size=vector_size)
     store.upsert_mentors(mentors, vectors)
     return len(mentors)

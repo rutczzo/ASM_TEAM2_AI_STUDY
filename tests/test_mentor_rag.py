@@ -43,6 +43,12 @@ class FakeEmbeddingClient:
         return [[1.0, 0.0, 0.0] for _ in texts]
 
 
+class MismatchedEmbeddingClient(FakeEmbeddingClient):
+    def embed_passages(self, texts):
+        self.passages.append(texts)
+        return []
+
+
 class FakeVectorStore:
     def __init__(self):
         self.searches = []
@@ -297,6 +303,32 @@ class MentorRagTest(unittest.TestCase):
         self.assertIn("이름: 이채린", embedding_client.passages[0][0])
         self.assertEqual(vector_store.upserts[0][0][0]["name"], "이채린")
         self.assertEqual(vector_store.upserts[0][1], [[1.0, 0.0, 0.0]])
+
+    def test_index_mentors_rejects_embedding_count_mismatch(self):
+        with TemporaryDirectory() as temp_dir:
+            mentors_path = Path(temp_dir) / "mentors.json"
+            mentors_path.write_text(
+                """
+                [
+                  {
+                    "name": "이채린",
+                    "domain": ["AI", "LLM"],
+                    "keywords": ["rag"],
+                    "can_help": ["RAG 설계"],
+                    "less_relevant_for": [],
+                    "profile_summary": "LLM 멘토"
+                  }
+                ]
+                """,
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(ValueError):
+                index_mentors(
+                    mentors_path=mentors_path,
+                    embedding_client=MismatchedEmbeddingClient(),
+                    vector_store=FakeVectorStore(),
+                )
 
 
 if __name__ == "__main__":

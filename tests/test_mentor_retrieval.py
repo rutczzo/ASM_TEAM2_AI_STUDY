@@ -56,6 +56,7 @@ class MentorRetrievalTest(unittest.TestCase):
         self.assertEqual(candidates[0]["name"], "이채린")
         self.assertIn("rag", candidates[0]["matched_keywords"])
         self.assertIn("langgraph", candidates[0]["matched_keywords"])
+        self.assertEqual(candidates[0]["retrieval_source"], "bm25_rule")
         self.assertGreater(candidates[0]["retrieval_score"], 0)
 
     def test_infra_gap_retrieves_deployment_mentor_first(self):

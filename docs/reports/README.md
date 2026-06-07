@@ -3,6 +3,8 @@
 통합 오너(donghakk)가 진행한 Phase 2(노드1~4 + 프론트엔드 end-to-end 마감) 단계별 보고서.
 팀 공유용. 브랜치 `feat/integration`.
 
+> 🧪 **직접 돌려보려면 → [통합 데모 테스트 가이드](demo-integration-guide.md)** (백엔드+프론트 실연동 실행법)
+
 | 단계 | 보고서 | 핵심 산출물 | 커밋 |
 |---|---|---|---|
 | 1 | [그래프 조립](phase2-step1-graph.md) | `backend/app/graph/workflow.py` (LangGraph) | `ebe0334` |

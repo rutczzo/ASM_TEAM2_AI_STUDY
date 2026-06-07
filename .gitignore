@@ -14,6 +14,10 @@ venv/
 # OS
 .DS_Store
 
+# Frontend build / deps
+frontend/dist/
+frontend/node_modules/
+
 # Vector DB / local artifacts
 chroma_db/
 faiss_index/

@@ -145,7 +145,23 @@ export function useRecommend(): UseRecommendResult {
             await sleep(REFINE_DELAY);
           }
         } else {
-          response = await callServer(req);
+          // 실서버는 응답이 매우 빠르므로(~10ms) 그냥 두면 분석 진행 화면(S-02)이
+          // 사용자 눈에 보이지 않는다. 단계가 한 바퀴 도는 시간만큼 최소 로딩을
+          // 보장해, 진행 중임을 명시적으로 보여준다(서버 호출과 동시 진행).
+          const [serverResponse] = await Promise.all([
+            callServer(req),
+            sleep(STEP_INTERVAL * STEP_COUNT),
+          ]);
+          response = serverResponse;
+
+          // 재검색 연출: limited 또는 refined 추천이면 refining 한 박자(mock 과 동일)
+          const willRefine =
+            response.status === 'limited' ||
+            (response.status === 'recommended' && response.refined);
+          if (willRefine) {
+            if (mountedRef.current) setRefining(true);
+            await sleep(REFINE_DELAY);
+          }
         }
 
         clearTimers();

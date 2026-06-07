@@ -27,3 +27,6 @@ qdrant_storage/
 # Claude personal context
 CLAUDE.local.md
 .claude/
+
+# Planning docs (바이너리 문서는 레포에 커밋하지 않음)
+docs/*.docx

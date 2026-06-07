@@ -1,6 +1,6 @@
-# 통합 데모 테스트 가이드 (팀원용) — `feat/integration`
+# 통합 데모 테스트 가이드 (팀원용) — `main`
 
-`feat/integration` 브랜치를 pull 받아 **백엔드(FastAPI) + 프론트엔드를 함께 띄워**
+`main` 브랜치를 pull 받아 **백엔드(FastAPI) + 프론트엔드를 함께 띄워**
 노드1~4 + 프론트의 end-to-end 흐름을 **실서버 응답**으로 직접 돌려보는 방법입니다.
 (목 데이터가 아니라 실제 추천 파이프라인이 동작합니다.)
 
@@ -24,8 +24,8 @@
 ```bash
 cd ASM_TEAM2_AI_STUDY
 git fetch origin
-git checkout feat/integration
-git pull origin feat/integration
+git checkout main
+git pull origin main
 ```
 
 ---

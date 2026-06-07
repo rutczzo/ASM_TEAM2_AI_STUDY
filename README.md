@@ -43,10 +43,17 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    S["START"] --> P["Input Parser"]
+    U["POST /recommend"] --> I["FastAPI: 요청을 GraphState로 변환"]
+    I --> S["LangGraph START"]
+    S --> P["Input Parser<br/>입력 구조화 / 추가 답변 병합"]
     P --> C{"입력이 충분한가?"}
-    C -->|"아니오"| Q["Clarification"]
-    Q --> E1["END: need_clarification"]
+    C -->|"아니오"| Q["Clarification: 확인 질문 생성"]
+    Q --> E1["LangGraph END"]
+    E1 --> N["need_clarification 응답<br/>원본 입력 세션 유지"]
+    N --> A["사용자 추가 답변"]
+    A --> U2["동일 session_id로<br/>POST /recommend 재요청"]
+    U2 --> M["FastAPI: session_id로<br/>원본 입력 복원"]
+    M --> S
     C -->|"예"| G["Interview Gap"]
     G --> R["Mentor Retrieval"]
     R --> F["Fit Evaluation"]
@@ -55,18 +62,22 @@ flowchart TD
     D -->|"아니오, 재시도 가능"| X["Query Refiner"]
     X --> R
     D -->|"아니오, 재시도 소진"| B
-    B --> E2["END: recommended / limited"]
+    B --> E2["LangGraph END"]
+    E2 --> O["recommended / limited 응답<br/>세션 정리"]
 ```
 
 | 단계 | 처리 내용 |
 |---|---|
-| Input Parser | 입력을 구조화하고 추천에 필요한 정보가 충분한지 판단합니다. |
-| Clarification | 입력이 부족하면 가장 필요한 확인 질문 1개를 반환합니다. |
+| FastAPI Request Handling | 요청을 GraphState로 변환합니다. 확인 질문 후속 요청이면 `session_id`로 보관한 원본 입력을 복원합니다. |
+| Input Parser | 원본 입력과 `clarify_answer`를 병합하고, 입력을 구조화해 추천에 필요한 정보가 충분한지 판단합니다. |
+| Clarification | 입력이 부족하면 확인 질문 1개를 생성하고 현재 LangGraph 실행을 종료합니다. |
 | Interview Gap | 프로젝트 상황에서 부족한 역량, 우선순위와 검색 힌트를 도출합니다. |
 | Mentor Retrieval | 약점 기반 검색 질의를 구성해 멘토 후보를 검색합니다. |
 | Fit Evaluation | 검색 점수와 규칙 일치도를 결합해 적합도와 추천 이유를 생성합니다. |
 | Query Refiner | 추천 근거가 약하면 검색 질의를 보정하고 최대 1회 재검색합니다. |
 | Result Builder | 상위 3명의 멘토를 프론트엔드 응답 계약에 맞춰 반환합니다. |
+
+확인 질문 응답은 하나의 LangGraph 실행 안에서 반복되지 않습니다. `need_clarification` 응답 후 프론트엔드가 동일한 `session_id`로 새 요청을 보내면, FastAPI가 저장된 원본 입력을 복원하고 Input Parser가 `clarify_answer`를 병합해 처리를 이어갑니다.
 
 추천 이유는 멘토 프로필과 약점 분석에 존재하는 정보만 조합해 생성하며, 프로필에 없는 경력이나 전문성을 임의로 추가하지 않습니다.
 
